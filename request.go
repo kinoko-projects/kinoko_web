@@ -20,15 +20,21 @@ type RequestCtx struct {
 	Request        *http.Request
 	Form           *multipart.Form
 	ResponseWriter http.ResponseWriter
+	SQL            *SQLSession
 }
 
 func NewRequestCtx(queryString map[string][]string, pathVariable map[string]string, request *http.Request, form *multipart.Form, responseWriter http.ResponseWriter) *RequestCtx {
+	var session *SQLSession
+	if sqlPropertiesHolder.SQL.Valid {
+		session = newSQLSession(0, sqlPropertiesHolder.SQL.DefaultDataSource)
+	}
 	return &RequestCtx{
 		QueryString:    queryString,
 		PathVariable:   pathVariable,
 		Request:        request,
 		Form:           form,
 		ResponseWriter: responseWriter,
+		SQL:            session,
 	}
 }
 
