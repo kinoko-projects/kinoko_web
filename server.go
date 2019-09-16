@@ -32,9 +32,17 @@ type HttpConfig struct {
 	WriteTimeout      time.Duration `inject:"kinoko.web.server.write-timeout"`
 	IdleTimeout       time.Duration `inject:"kinoko.web.server.idle-timeout"`
 }
+
+type SSLConfig struct {
+	EnableSSL bool   `inject:"kinoko.web.ssl.enable:false"`
+	CertFile  string `inject:"kinoko.web.ssl.cert-file:"`
+	KeyFile   string `inject:"kinoko.web.ssl.key-file:"`
+}
+
 type HttpServer struct {
-	handlers *RequestHandler
-	Config   *HttpConfig `inject:""`
+	handlers   *RequestHandler
+	HttpConfig *HttpConfig `inject:""`
+	SSLConfig  *SSLConfig  `inject:""`
 }
 
 type RequestMapper interface {
@@ -50,14 +58,19 @@ type HttpController interface {
 }
 
 // customize response by handle it manually return true if handled
-type ResponseWrapper interface {
-	Wrap(v interface{}, wr http.ResponseWriter) bool
+type ResponseResolver interface {
+	ResolveResponse(v interface{}, wr http.ResponseWriter) bool
+}
+
+// customizable resolver for any http request, put any custom properties on Property field, eg: query paging
+type RequestResolver interface {
+	ResolveRequest(ctx *RequestCtx)
 }
 
 type RequestHandler struct {
 	mapping          map[RequestMethod]*prefixNode
 	interceptorChain InterceptorChain
-	responseWrapper  *list.List
+	responseResolver *list.List
 }
 
 type RequestMethod string
@@ -208,6 +221,7 @@ func (c *RequestHandler) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 	pv := make(map[string]string)
 	url := r.URL.Path
 
+	//format the url
 	for _, reg := range urlFormatRegexp {
 		url = reg.ReplaceAllString(url, "/")
 	}
@@ -236,17 +250,21 @@ func (c *RequestHandler) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 		currentNode = node
 	}
 
-	//recover from any exception
-	defer func() {
-		if err := recover(); err != nil {
-			HttpError(wr, http.StatusInternalServerError, fmt.Sprint(err), true)
-		}
-	}()
-
 	//mapped
 	if currentNode != nil && currentNode.mapped {
 
 		ctx := NewRequestCtx(r.URL.Query(), pv, r, r.MultipartForm, wr)
+
+		//recover from any exception
+		defer func() {
+			//panic
+			if err := recover(); err != nil {
+				if ctx.SQL != nil {
+					ctx.SQL.Rollback() //rollback any uncommitted transaction
+				}
+				HttpError(wr, http.StatusInternalServerError, fmt.Sprint(err), true)
+			}
+		}()
 
 		var intercepted bool
 		// firstly, handle with interceptorChain
@@ -257,15 +275,19 @@ func (c *RequestHandler) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 		}
 
 		//find a proper response wrapper
-		for e := c.responseWrapper.Front(); e != nil; e = e.Next() {
-			if e.Value.(ResponseWrapper).Wrap(obj, wr) {
+		for e := c.responseResolver.Front(); e != nil; e = e.Next() {
+			if e.Value.(ResponseResolver).ResolveResponse(obj, wr) {
 				return
 			}
 		}
-
+		//commit any uncommitted transaction
+		if ctx.SQL != nil {
+			ctx.SQL.Commit()
+		}
 		//default wrapper
-		c.defaultResponseWrapper(obj, wr)
-	} else { //unmapped
+		c.defaultResponseResolver(obj, wr)
+	} else {
+		//unmapped url
 		http.NotFound(wr, r)
 		return
 	}
@@ -273,12 +295,12 @@ func (c *RequestHandler) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 }
 
 // append to the top of response
-func (s *HttpServer) AddResponseWrapper(wrapper ResponseWrapper) {
-	s.handlers.responseWrapper.PushFront(wrapper)
+func (s *HttpServer) AddResponseResolver(wrapper ResponseResolver) {
+	s.handlers.responseResolver.PushFront(wrapper)
 }
 
 //default response wrapper
-func (c *RequestHandler) defaultResponseWrapper(v interface{}, wr http.ResponseWriter) bool {
+func (c *RequestHandler) defaultResponseResolver(v interface{}, wr http.ResponseWriter) bool {
 	var err error
 
 	//Nil
@@ -325,22 +347,29 @@ func (s *HttpServer) AddInterceptor(interceptor Interceptor) {
 func (s *HttpServer) startWith(block bool) *http.Server {
 
 	//default :8080
-	if s.Config.Address == "" {
-		s.Config.Address = ":8080"
+	if s.HttpConfig.Address == "" {
+		s.HttpConfig.Address = ":8080"
 	}
 
 	server := &http.Server{
 		Handler:           s.handlers,
-		Addr:              s.Config.Address,
-		WriteTimeout:      s.Config.WriteTimeout,
-		ReadTimeout:       s.Config.ReadTimeout,
-		ReadHeaderTimeout: s.Config.ReadHeaderTimeout,
-		IdleTimeout:       s.Config.IdleTimeout,
+		Addr:              s.HttpConfig.Address,
+		WriteTimeout:      s.HttpConfig.WriteTimeout,
+		ReadTimeout:       s.HttpConfig.ReadTimeout,
+		ReadHeaderTimeout: s.HttpConfig.ReadHeaderTimeout,
+		IdleTimeout:       s.HttpConfig.IdleTimeout,
 	}
 
 	go func() {
-		logger.Info("Kinoko web server started at", s.Config.Address)
-		err := server.ListenAndServe()
+		var err error
+		logger.Info("Kinoko web server started at", s.HttpConfig.Address)
+		if s.SSLConfig.EnableSSL {
+			logger.Info("SSL is enabled.")
+			err = server.ListenAndServeTLS(s.SSLConfig.CertFile, s.SSLConfig.KeyFile)
+		} else {
+			err = server.ListenAndServe()
+		}
+
 		logger.Warn(err)
 
 	}()

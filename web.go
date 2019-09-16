@@ -12,7 +12,7 @@ func (s *HttpServer) Start(ctx context.Context) {
 }
 
 func (s *HttpServer) Initialize() error {
-	s.handlers = &RequestHandler{responseWrapper: list.New()}
+	s.handlers = &RequestHandler{responseResolver: list.New()}
 	controllers := kinoko.Application.GetImplementedSpores((*HttpController)(nil))
 	for _, controller := range controllers {
 		controller.(HttpController).Mapping(s)
@@ -23,9 +23,9 @@ func (s *HttpServer) Initialize() error {
 		s.AddInterceptor(interceptor.(Interceptor))
 	}
 
-	responseWrappers := kinoko.Application.GetImplementedSpores((*ResponseWrapper)(nil))
-	for _, responseWrapper := range responseWrappers {
-		s.AddResponseWrapper(responseWrapper.(ResponseWrapper))
+	responseResolvers := kinoko.Application.GetImplementedSpores((*ResponseResolver)(nil))
+	for _, responseResolver := range responseResolvers {
+		s.AddResponseResolver(responseResolver.(ResponseResolver))
 	}
 
 	return nil

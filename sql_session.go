@@ -21,12 +21,6 @@ type SQLExecutor interface {
 	Query(sql string, parameters ...interface{}) (*sql.Rows, error)
 }
 
-//TODO proxy (paging) & mapper
-//type SQLExecutorProxy interface {
-//	executeNProxy(executor SQLExecutor)
-//	queryProxy(executor SQLExecutor)
-//}
-
 //The original executor of db & tx
 type executor interface {
 	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
