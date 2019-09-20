@@ -12,15 +12,17 @@ type SQL struct {
 	DefaultDataSource       *sql.DB
 	DataSources             map[string]*sql.DB
 	Configs                 map[interface{}]interface{} `inject:"kinoko.sql.datasource"`
+	Proxy                   SQLProxy
+}
+
+type DataSource struct {
+	DBPools []*sql.DB
+	LB      DBLoadBalancer
 }
 
 //The sql datasource holder
 type SqlPropertiesHolder struct {
 	SQL *SQL `inject:""`
-}
-
-func (s *SqlPropertiesHolder) Initialize() error {
-	panic("implement me")
 }
 
 var sqlPropertiesHolder = SqlPropertiesHolder{}
@@ -61,6 +63,7 @@ func (s *SQL) Initialize() error {
 				return e
 			}
 			s.DataSources[k.(string)] = db
+
 			if s.DefaultDataSource == nil && k == s.DefaultMultiDataSources {
 				s.DefaultDataSource = db
 			}

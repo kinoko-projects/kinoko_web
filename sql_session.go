@@ -13,6 +13,7 @@ type SQLSession struct {
 	db            *sql.DB
 	exec          executor
 	err           error
+	proxy         SQLProxy
 }
 
 type SQLExecutor interface {
